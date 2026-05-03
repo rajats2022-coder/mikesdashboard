@@ -17,6 +17,7 @@ Live purpose: help Mike organize incoming catering leads, frozen empanada orders
 - Connections page showing what needs to be wired for production
 - Export/import JSON so data can be moved before a real database is attached
 - Browser localStorage adapter now, API/database adapter hook ready later
+- Auto-refresh loop checks for new orders every 60 seconds, on app focus, and through a manual Refresh button
 
 ## Production Readiness Notes
 
@@ -26,7 +27,7 @@ Before giving this to Mike as a real private production dashboard, add:
 
 1. Authentication: Vercel Password Protection, Clerk, Supabase Auth, Firebase Auth, or Cloudflare Access.
 2. Database: Supabase, Firebase, Airtable, or a custom backend.
-3. Form/webhook wiring from the website booking forms.
+3. Form/webhook wiring from the website booking forms. The dashboard already attempts `GET /api/leads` every 60 seconds and `POST /api/leads` for new leads, then falls back to local storage until that endpoint exists.
 4. Email parser or Gmail/Make/Zapier flow for lead notification emails.
 5. Optional SMS/email reminder automation for overdue follow-ups.
 

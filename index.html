@@ -37,12 +37,13 @@
         <div class="top-actions">
           <button class="ghost-btn" id="exportData" type="button">Export</button>
           <button class="ghost-btn" id="importData" type="button">Import</button>
+          <button class="ghost-btn" id="refreshNow" type="button">Refresh</button>
           <button class="ghost-btn" id="resetDemo" type="button">Reset Demo</button>
           <button class="primary-btn" id="openLeadModal" type="button">Add Lead</button>
         </div>
       </header>
 
-      <section class="notice-line"><div class="pulse-dot"></div><p id="notificationSummary">New lead notifications will appear here.</p></section>
+      <section class="notice-line"><div class="pulse-dot" id="syncDot"></div><div><p id="notificationSummary">New lead notifications will appear here.</p><span class="sync-status" id="syncStatus">Auto-refresh ready.</span></div></section>
 
       <section class="view active" id="view-dashboard" data-title="Overview">
         <div class="metric-grid" id="metricGrid"></div>

@@ -1,5 +1,7 @@
 const STORAGE_KEY = 'mikeNiceCommandCenter.v2';
 const SCHEMA_VERSION = 3;
+const REFRESH_INTERVAL_MS = 60 * 1000;
+const API_ENDPOINT = '/api/leads';
 
 const stages = [
   { id: 'new', label: 'New' },
@@ -132,9 +134,31 @@ const dataAdapter = {
   save(nextState) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeState(nextState)));
   },
+  async sync() {
+    if (!window.fetch) return { mode: 'local', state: this.load() };
+    try {
+      const response = await fetch(API_ENDPOINT, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      if (!response.ok) throw new Error(`API ${response.status}`);
+      const remote = normalizeState(await response.json());
+      this.save(remote);
+      return { mode: 'api', state: remote };
+    } catch (error) {
+      return { mode: 'local', state: this.load(), error };
+    }
+  },
   async postLead(payload) {
     const normalized = normalizeLead(payload);
-    state.leads.unshift(normalized);
+    try {
+      const response = await fetch(API_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(normalized) });
+      if (response.ok) {
+        const saved = normalizeLead(await response.json());
+        state.leads = upsertLead(state.leads, saved);
+        this.save(state);
+        render();
+        return saved;
+      }
+    } catch {}
+    state.leads = upsertLead(state.leads, normalized);
     this.save(state);
     render();
     return normalized;
@@ -146,6 +170,9 @@ let activeView = 'dashboard';
 let filters = { catering: 'all', frozen: 'all', merch: 'all' };
 let crmSearch = '';
 let crmSegment = 'all';
+let syncTimer = null;
+let lastSyncMode = 'local';
+let lastSyncAt = null;
 
 const $ = selector => document.querySelector(selector);
 const els = {
@@ -154,12 +181,13 @@ const els = {
   todayFocus: $('#todayFocus'), todaySubtext: $('#todaySubtext'), leadModal: $('#leadModal'), leadForm: $('#leadForm'),
   detailDrawer: $('#detailDrawer'), settingsForm: $('#settingsForm'), playbookList: $('#playbookList'), connectionsGrid: $('#connectionsGrid'),
   schemaBlock: $('#schemaBlock'), importFile: $('#importFile'), crmGrid: $('#crmGrid'), crmTable: $('#crmTable'), crmSearch: $('#crmSearch'), crmSegment: $('#crmSegment'),
+  refreshNow: $('#refreshNow'), syncStatus: $('#syncStatus'), syncDot: $('#syncDot'),
 };
 
 init();
 
 function init() {
-  bindNav(); bindModal(); bindSettings(); bindImportExport(); bindConnections(); bindCrm(); renderStatusOptions(); render();
+  bindNav(); bindModal(); bindSettings(); bindImportExport(); bindConnections(); bindCrm(); bindSync(); renderStatusOptions(); render(); refreshData('startup');
 }
 
 function freshState() { return { schemaVersion: SCHEMA_VERSION, leads: demoLeads.map(item => ({ ...item })), settings: { ...defaultSettings } }; }
@@ -171,6 +199,20 @@ function money(value) { return Number(value || 0).toLocaleString('en-US', { styl
 function escapeHtml(value = '') { return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function stageLabel(status) { return stages.find(stage => stage.id === status)?.label || status; }
 function byDate(a, b) { return new Date(a.nextAction || a.createdAt) - new Date(b.nextAction || b.createdAt); }
+function upsertLead(leads, nextLead) {
+  const normalized = normalizeLead(nextLead);
+  const existingIndex = leads.findIndex(lead => lead.id === normalized.id);
+  if (existingIndex === -1) return [normalized, ...leads];
+  return leads.map((lead, index) => index === existingIndex ? normalized : lead);
+}
+function formatTime(date) { return date ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'never'; }
+function setSyncStatus(message, mode = lastSyncMode) {
+  if (els.syncStatus) els.syncStatus.textContent = message;
+  if (els.syncDot) {
+    els.syncDot.classList.toggle('syncing', mode === 'syncing');
+    els.syncDot.classList.toggle('offline', mode === 'local');
+  }
+}
 function tagsFrom(input) {
   if (Array.isArray(input)) return input.map(tag => String(tag).trim()).filter(Boolean);
   return String(input || '').split(',').map(tag => tag.trim()).filter(Boolean);
@@ -271,6 +313,27 @@ function bindCrm() {
     toast(`${rows.length} marketing contacts copied`);
   });
 }
+function bindSync() {
+  els.refreshNow?.addEventListener('click', () => refreshData('manual'));
+  window.addEventListener('storage', event => {
+    if (event.key !== STORAGE_KEY || !event.newValue) return;
+    try { state = normalizeState(JSON.parse(event.newValue)); render(); setSyncStatus(`Updated from another tab at ${formatTime(new Date())}`, 'api'); }
+    catch {}
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshData('visible'); });
+  syncTimer = window.setInterval(() => refreshData('timer'), REFRESH_INTERVAL_MS);
+}
+async function refreshData(reason = 'timer') {
+  setSyncStatus('Checking for new orders...', 'syncing');
+  const result = await dataAdapter.sync();
+  state = result.state;
+  lastSyncMode = result.mode;
+  lastSyncAt = new Date();
+  render();
+  const source = result.mode === 'api' ? 'live API' : 'local storage';
+  setSyncStatus(`Last checked ${formatTime(lastSyncAt)} via ${source}. Auto-refresh every 60 seconds.`, result.mode);
+  if (reason === 'manual') toast(`Refreshed from ${source}`);
+}
 
 function renderStatusOptions() { els.leadForm.querySelector('[name="status"]').innerHTML = stages.map(stage => `<option value="${stage.id}">${stage.label}</option>`).join(''); }
 function render() { renderSummary(); renderDashboard(); renderBoards(); renderCrm(); renderSettings(); renderConnections(); }
@@ -333,7 +396,7 @@ function crmRow(lead) {
   return `<div class="crm-row"><button type="button" onclick="openLead('${lead.id}')">${escapeHtml(lead.customer)}<small>${escapeHtml(lead.phone || lead.email || 'No contact saved')}</small></button><span>${escapeHtml(lead.email || 'No email')}<small>${escapeHtml(lead.preferredContact || 'No preference')} - ${escapeHtml(lead.marketingConsent === 'yes' ? 'Marketing ok' : 'Consent ' + lead.marketingConsent)}</small></span><span>${sectionMeta[lead.section].label}<small>${escapeHtml(lead.tags.join(', ') || lead.customerType)}</small></span><span><span class="tag green">${leadScore(lead)}</span></span><span>${escapeHtml(lead.nextAction || 'Unset')}<small>${stageLabel(lead.status)}</small></span></div>`;
 }
 function renderSettings() { Object.entries(state.settings).forEach(([key, value]) => { const input = els.settingsForm.querySelector(`[name="${key}"]`); if (input) input.value = value; }); els.playbookList.innerHTML = Object.entries(sectionMeta).map(([, meta]) => `<article class="playbook-item"><strong>${meta.label}</strong><p>${meta.playbook.join(' ')}</p></article>`).join(''); }
-function renderConnections() { els.connectionsGrid.innerHTML = connections.map(item => `<article class="connection-card"><header><div><p class="eyebrow">${escapeHtml(item.id)}</p><h2>${escapeHtml(item.label)}</h2></div><span class="status-dot ${item.status === 'ready' ? 'ready' : item.status === 'blocked' ? 'blocked' : ''}"></span></header><p>${escapeHtml(item.description)}</p><span class="tag ${item.status === 'ready' ? 'green' : 'dark'}">${item.status}</span><p><strong>Next:</strong> ${escapeHtml(item.next)}</p></article>`).join(''); els.schemaBlock.textContent = JSON.stringify(inboundLeadSchema, null, 2); }
+function renderConnections() { els.connectionsGrid.innerHTML = connections.map(item => `<article class="connection-card"><header><div><p class="eyebrow">${escapeHtml(item.id)}</p><h2>${escapeHtml(item.label)}</h2></div><span class="status-dot ${item.status === 'ready' ? 'ready' : item.status === 'blocked' ? 'blocked' : ''}"></span></header><p>${escapeHtml(item.description)}</p><span class="tag ${item.status === 'ready' ? 'green' : 'dark'}">${item.status}</span><p><strong>Next:</strong> ${escapeHtml(item.next)}</p></article>`).join(''); els.schemaBlock.textContent = JSON.stringify({ ...inboundLeadSchema, sync: { listEndpoint: 'GET /api/leads', createEndpoint: 'POST /api/leads', polling: 'Dashboard checks every 60 seconds and whenever the app becomes visible.' } }, null, 2); }
 function toast(message) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = message; document.body.appendChild(el); setTimeout(() => el.remove(), 2200); }
 
-window.openLead = openLead; window.closeLead = closeLead; window.moveLead = moveLead; window.setNextAction = setNextAction; window.archiveLead = archiveLead; window.addNote = addNote; window.showView = showView; window.MikeNiceDashboard = { dataAdapter, normalizeLead, inboundLeadSchema, getState: () => state };
+window.openLead = openLead; window.closeLead = closeLead; window.moveLead = moveLead; window.setNextAction = setNextAction; window.archiveLead = archiveLead; window.addNote = addNote; window.showView = showView; window.MikeNiceDashboard = { dataAdapter, normalizeLead, inboundLeadSchema, refreshData, getState: () => state };
