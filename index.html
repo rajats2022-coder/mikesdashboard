@@ -24,6 +24,7 @@
         <button class="nav-item" data-view="catering" type="button"><span>Catering Leads</span><small>Events + quotes</small></button>
         <button class="nav-item" data-view="frozen" type="button"><span>Frozen Empanadas</span><small>Orders + pickup</small></button>
         <button class="nav-item" data-view="merch" type="button"><span>Merch</span><small>Gear + fulfillment</small></button>
+        <button class="nav-item" data-view="crm" type="button"><span>CRM</span><small>All contacts + notes</small></button>
         <button class="nav-item" data-view="connections" type="button"><span>Connections</span><small>Forms + email + API</small></button>
         <button class="nav-item" data-view="settings" type="button"><span>Business Setup</span><small>Rules + reminders</small></button>
       </nav>
@@ -55,6 +56,12 @@
       <section class="view" id="view-catering" data-title="Catering Leads"><div class="section-toolbar"><div><p class="eyebrow">Catering notifications</p><h2>Events, quotes, and booked catering</h2></div><div class="filter-row" data-section-filter="catering"></div></div><div class="lead-board" id="cateringBoard"></div></section>
       <section class="view" id="view-frozen" data-title="Frozen Empanadas"><div class="section-toolbar"><div><p class="eyebrow">Frozen order pipeline</p><h2>Pickup, delivery, and batch prep</h2></div><div class="filter-row" data-section-filter="frozen"></div></div><div class="lead-board" id="frozenBoard"></div></section>
       <section class="view" id="view-merch" data-title="Merch"><div class="section-toolbar"><div><p class="eyebrow">Merch pipeline</p><h2>Shirts, hats, aprons, and custom drops</h2></div><div class="filter-row" data-section-filter="merch"></div></div><div class="lead-board" id="merchBoard"></div></section>
+
+      <section class="view" id="view-crm" data-title="CRM">
+        <div class="section-toolbar"><div><p class="eyebrow">Customer memory</p><h2>Everyone who filled out a form, called, DM'd, or ordered</h2></div><div class="crm-tools"><input id="crmSearch" type="search" placeholder="Search name, phone, email, notes"><select id="crmSegment"><option value="all">All segments</option><option value="hot">Hot leads</option><option value="catering">Catering</option><option value="frozen">Frozen</option><option value="merch">Merch</option><option value="marketing">Marketing ok</option><option value="due">Follow-up due</option></select></div></div>
+        <div class="crm-grid" id="crmGrid"></div>
+        <section class="surface crm-table-wrap"><div class="section-head"><div><p class="eyebrow">Contact list</p><h2>CRM Contacts</h2></div><button class="ghost-btn compact" id="copyMarketingList" type="button">Copy Marketing List</button></div><div class="crm-table" id="crmTable"></div></section>
+      </section>
 
       <section class="view" id="view-connections" data-title="Connections">
         <div class="connections-grid" id="connectionsGrid"></div>
@@ -89,8 +96,12 @@
         <label>Phone<input name="phone" placeholder="(984) 272-2728"></label>
         <label>Email<input name="email" type="email" placeholder="customer@email.com"></label>
         <label>Source<select name="source"><option>Website form</option><option>Email</option><option>Instagram</option><option>Phone call</option><option>StreetFoodFinder</option><option>Referral</option><option>API/Webhook</option></select></label>
+        <label>Preferred contact<select name="preferredContact"><option>Text</option><option>Call</option><option>Email</option><option>Instagram DM</option></select></label>
         <label>Value<input name="value" type="number" min="0" step="25" placeholder="Estimated $"></label>
         <label>Next action date<input name="nextAction" type="date"></label>
+        <label>Customer type<select name="customerType"><option>New lead</option><option>Repeat customer</option><option>Corporate buyer</option><option>Event planner</option><option>Wholesale / partner</option><option>Fan / merch buyer</option></select></label>
+        <label>Marketing consent<select name="marketingConsent"><option value="unknown">Unknown</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+        <label class="wide">Tags<input name="tags" placeholder="wedding, corporate, birria, VIP, large order"></label>
         <label class="wide">Request details<textarea name="details" rows="4" placeholder="Event date, guest count, pickup details, merch sizes, notes..."></textarea></label>
       </div>
       <menu class="modal-actions"><button class="ghost-btn" value="cancel" type="submit">Cancel</button><button class="primary-btn" value="default" type="submit">Save Lead</button></menu>

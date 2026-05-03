@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'mikeNiceCommandCenter.v2';
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const stages = [
   { id: 'new', label: 'New' },
@@ -105,7 +105,11 @@ const inboundLeadSchema = {
   value: 'Estimated number in USD',
   nextAction: 'YYYY-MM-DD optional',
   details: 'Full request text',
-  metadata: { eventDate: 'optional', guests: 'optional', pickupDate: 'optional', items: 'optional' },
+  preferredContact: 'Text | Call | Email | Instagram DM',
+  customerType: 'New lead | Repeat customer | Corporate buyer | Event planner | Wholesale / partner | Fan / merch buyer',
+  marketingConsent: 'yes | no | unknown',
+  tags: ['wedding', 'corporate', 'birria', 'VIP'],
+  metadata: { eventDate: 'optional', guests: 'optional', pickupDate: 'optional', items: 'optional', formName: 'optional' },
 };
 
 const demoLeads = [
@@ -140,6 +144,8 @@ const dataAdapter = {
 let state = dataAdapter.load();
 let activeView = 'dashboard';
 let filters = { catering: 'all', frozen: 'all', merch: 'all' };
+let crmSearch = '';
+let crmSegment = 'all';
 
 const $ = selector => document.querySelector(selector);
 const els = {
@@ -147,24 +153,40 @@ const els = {
   notificationList: $('#notificationList'), notificationSummary: $('#notificationSummary'), followUpList: $('#followUpList'),
   todayFocus: $('#todayFocus'), todaySubtext: $('#todaySubtext'), leadModal: $('#leadModal'), leadForm: $('#leadForm'),
   detailDrawer: $('#detailDrawer'), settingsForm: $('#settingsForm'), playbookList: $('#playbookList'), connectionsGrid: $('#connectionsGrid'),
-  schemaBlock: $('#schemaBlock'), importFile: $('#importFile'),
+  schemaBlock: $('#schemaBlock'), importFile: $('#importFile'), crmGrid: $('#crmGrid'), crmTable: $('#crmTable'), crmSearch: $('#crmSearch'), crmSegment: $('#crmSegment'),
 };
 
 init();
 
 function init() {
-  bindNav(); bindModal(); bindSettings(); bindImportExport(); bindConnections(); renderStatusOptions(); render();
+  bindNav(); bindModal(); bindSettings(); bindImportExport(); bindConnections(); bindCrm(); renderStatusOptions(); render();
 }
 
 function freshState() { return { schemaVersion: SCHEMA_VERSION, leads: demoLeads.map(item => ({ ...item })), settings: { ...defaultSettings } }; }
 function lead(section, status, customer, value, source, details, dueOffset, phone, email) {
-  return normalizeLead({ section, status, customer, value, source, details, phone, email, nextAction: todayPlus(dueOffset), createdAt: todayPlus(Math.min(0, dueOffset - 2)), notes: [`Seed ${sectionMeta[section]?.label || section} item.`] });
+  return normalizeLead({ section, status, customer, value, source, details, phone, email, preferredContact: phone ? 'Text' : 'Email', customerType: section === 'catering' ? 'Event planner' : section === 'merch' ? 'Fan / merch buyer' : 'Repeat customer', marketingConsent: 'unknown', tags: [sectionMeta[section]?.label || section], nextAction: todayPlus(dueOffset), createdAt: todayPlus(Math.min(0, dueOffset - 2)), notes: [`Seed ${sectionMeta[section]?.label || section} item.`] });
 }
 function todayPlus(offset) { const date = new Date(); date.setDate(date.getDate() + offset); return date.toISOString().slice(0, 10); }
 function money(value) { return Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }); }
 function escapeHtml(value = '') { return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function stageLabel(status) { return stages.find(stage => stage.id === status)?.label || status; }
 function byDate(a, b) { return new Date(a.nextAction || a.createdAt) - new Date(b.nextAction || b.createdAt); }
+function tagsFrom(input) {
+  if (Array.isArray(input)) return input.map(tag => String(tag).trim()).filter(Boolean);
+  return String(input || '').split(',').map(tag => tag.trim()).filter(Boolean);
+}
+function leadScore(lead) {
+  let score = 35;
+  if (lead.section === 'catering') score += 20;
+  if (Number(lead.value || 0) >= 500) score += 18;
+  if (Number(lead.metadata?.guests || 0) >= 50) score += 12;
+  if (lead.phone) score += 6;
+  if (lead.email) score += 4;
+  if (lead.status === 'booked') score += 18;
+  if (lead.status === 'done') score += 8;
+  if (lead.nextAction && lead.nextAction <= todayPlus(0) && lead.status !== 'done') score += 10;
+  return Math.min(100, score);
+}
 
 function normalizeState(input) {
   return { schemaVersion: SCHEMA_VERSION, settings: { ...defaultSettings, ...(input.settings || {}) }, leads: Array.isArray(input.leads) ? input.leads.map(normalizeLead) : [] };
@@ -177,8 +199,10 @@ function normalizeLead(input) {
     section, status,
     customer: String(input.customer || 'Unknown lead').trim(),
     phone: String(input.phone || '').trim(), email: String(input.email || '').trim(), source: String(input.source || 'API/Webhook'),
-    value: Number(input.value || 0), nextAction: input.nextAction || todayPlus(1), createdAt: input.createdAt || todayPlus(0),
+    value: Number(input.value || 0), nextAction: input.nextAction || todayPlus(1), createdAt: input.createdAt || todayPlus(0), lastContact: input.lastContact || '',
     details: String(input.details || 'No details entered yet.').trim(), notes: Array.isArray(input.notes) ? input.notes : [], metadata: input.metadata || {},
+    preferredContact: String(input.preferredContact || input.preferred_contact || (input.phone ? 'Text' : 'Email')).trim(),
+    customerType: String(input.customerType || input.customer_type || 'New lead').trim(), marketingConsent: String(input.marketingConsent || input.marketing_consent || 'unknown').trim(), tags: tagsFrom(input.tags),
   };
 }
 function persist() { dataAdapter.save(state); }
@@ -238,9 +262,18 @@ function bindImportExport() {
 function bindConnections() {
   $('#copySchema').addEventListener('click', async () => { await navigator.clipboard?.writeText(JSON.stringify(inboundLeadSchema, null, 2)); toast('Schema copied'); });
 }
+function bindCrm() {
+  els.crmSearch?.addEventListener('input', event => { crmSearch = event.target.value.toLowerCase().trim(); renderCrm(); });
+  els.crmSegment?.addEventListener('change', event => { crmSegment = event.target.value; renderCrm(); });
+  $('#copyMarketingList')?.addEventListener('click', async () => {
+    const rows = state.leads.filter(lead => lead.marketingConsent === 'yes' && (lead.email || lead.phone)).map(lead => `${lead.customer},${lead.email},${lead.phone},${lead.section},${lead.tags.join('|')}`);
+    await navigator.clipboard?.writeText(['name,email,phone,interest,tags', ...rows].join('\n'));
+    toast(`${rows.length} marketing contacts copied`);
+  });
+}
 
 function renderStatusOptions() { els.leadForm.querySelector('[name="status"]').innerHTML = stages.map(stage => `<option value="${stage.id}">${stage.label}</option>`).join(''); }
-function render() { renderSummary(); renderDashboard(); renderBoards(); renderSettings(); renderConnections(); }
+function render() { renderSummary(); renderDashboard(); renderBoards(); renderCrm(); renderSettings(); renderConnections(); }
 function renderSummary() {
   const newCount = state.leads.filter(lead => lead.status === 'new').length;
   const dueToday = state.leads.filter(lead => lead.nextAction <= todayPlus(0) && lead.status !== 'done').length;
@@ -267,15 +300,40 @@ function sectionPanel(section) {
 function notificationItem(lead) { return `<button class="notification-item" type="button" onclick="openLead('${lead.id}')"><div><strong>${escapeHtml(lead.customer)}</strong><p>${sectionMeta[lead.section].label} via ${escapeHtml(lead.source)}. ${escapeHtml(lead.details)}</p></div><span class="tag ${lead.status === 'new' ? 'red' : 'dark'}">${stageLabel(lead.status)}</span></button>`; }
 function renderBoards() { ['catering', 'frozen', 'merch'].forEach(section => { const board = $(`#${section}Board`); if (board) board.innerHTML = stages.map(stage => renderColumn(section, stage)).join(''); }); }
 function renderColumn(section, stage) { const sectionFilter = filters[section]; const leads = state.leads.filter(lead => lead.section === section && lead.status === stage.id && (sectionFilter === 'all' || lead.status === sectionFilter)); return `<section class="lead-column"><div class="column-head"><h3>${stage.label}</h3><span class="count-pill">${leads.length}</span></div><div class="card-stack">${leads.map(leadCard).join('') || `<div class="lead-card"><p>${sectionMeta[section].empty}</p></div>`}</div></section>`; }
-function leadCard(lead) { return `<article class="lead-card"><header><strong>${escapeHtml(lead.customer)}</strong><span class="tag red">${money(lead.value)}</span></header><p>${escapeHtml(lead.details)}</p><div class="meta-row"><span class="tag">${escapeHtml(lead.source)}</span><span class="tag dark">Next: ${lead.nextAction || 'unset'}</span></div><div class="card-actions"><button type="button" onclick="openLead('${lead.id}')">Open</button><button type="button" onclick="moveLead('${lead.id}', 1)">Next Stage</button></div></article>`; }
+function leadCard(lead) { return `<article class="lead-card"><header><strong>${escapeHtml(lead.customer)}</strong><span class="tag red">${money(lead.value)}</span></header><p>${escapeHtml(lead.details)}</p><div class="meta-row"><span class="tag">${escapeHtml(lead.source)}</span><span class="tag dark">Next: ${lead.nextAction || 'unset'}</span><span class="tag green">CRM ${leadScore(lead)}</span></div><div class="card-actions"><button type="button" onclick="openLead('${lead.id}')">Open</button><button type="button" onclick="moveLead('${lead.id}', 1)">Next Stage</button></div></article>`; }
 function moveLead(id, direction) { const lead = state.leads.find(item => item.id === id); if (!lead) return; const index = stages.findIndex(stage => stage.id === lead.status); const next = stages[Math.max(0, Math.min(stages.length - 1, index + direction))]; lead.status = next.id; lead.notes.unshift(`Moved to ${next.label} on ${todayPlus(0)}.`); persist(); render(); openLead(id); }
-function openLead(id) { const lead = state.leads.find(item => item.id === id); if (!lead) return; els.detailDrawer.innerHTML = `<div class="drawer-head"><div><p class="eyebrow">${sectionMeta[lead.section].label}</p><h2>${escapeHtml(lead.customer)}</h2></div><button class="icon-btn" type="button" onclick="closeLead()">x</button></div><div class="meta-row"><span class="tag red">${stageLabel(lead.status)}</span><span class="tag">${money(lead.value)}</span><span class="tag dark">${escapeHtml(lead.source)}</span></div><section class="detail-section"><h3>Request</h3><p>${escapeHtml(lead.details)}</p></section><section class="detail-section"><h3>Contact</h3><p>${escapeHtml(lead.phone || 'No phone')}<br>${escapeHtml(lead.email || 'No email')}</p></section><section class="detail-section"><h3>Next Action</h3><p>${lead.nextAction || 'No date set'}</p></section><section class="detail-section"><h3>Notes</h3><p>${(lead.notes || []).map(escapeHtml).join('<br>') || 'No notes yet.'}</p></section><div class="drawer-actions"><button type="button" onclick="moveLead('${lead.id}', -1)">Move Back</button><button class="primary" type="button" onclick="moveLead('${lead.id}', 1)">Move Forward</button><button type="button" onclick="setNextAction('${lead.id}', 1)">Follow Up Tomorrow</button><button type="button" onclick="setNextAction('${lead.id}', 3)">Follow Up in 3 Days</button><button class="danger" type="button" onclick="archiveLead('${lead.id}')">Mark Done</button></div>`; els.detailDrawer.classList.add('open'); }
+function openLead(id) { const lead = state.leads.find(item => item.id === id); if (!lead) return; els.detailDrawer.innerHTML = `<div class="drawer-head"><div><p class="eyebrow">${sectionMeta[lead.section].label} CRM ${leadScore(lead)}</p><h2>${escapeHtml(lead.customer)}</h2></div><button class="icon-btn" type="button" onclick="closeLead()">x</button></div><div class="meta-row"><span class="tag red">${stageLabel(lead.status)}</span><span class="tag">${money(lead.value)}</span><span class="tag dark">${escapeHtml(lead.source)}</span><span class="tag green">${escapeHtml(lead.marketingConsent === 'yes' ? 'Marketing ok' : 'Consent ' + lead.marketingConsent)}</span></div><section class="detail-section"><h3>Request</h3><p>${escapeHtml(lead.details)}</p></section><section class="detail-section"><h3>Contact</h3><p>${escapeHtml(lead.phone || 'No phone')}<br>${escapeHtml(lead.email || 'No email')}<br>Prefers: ${escapeHtml(lead.preferredContact || 'Not set')}</p></section><section class="detail-section"><h3>CRM Profile</h3><p>Type: ${escapeHtml(lead.customerType)}<br>Tags: ${escapeHtml(lead.tags.join(', ') || 'None yet')}<br>Created: ${escapeHtml(lead.createdAt || 'Unknown')}<br>Last contact: ${escapeHtml(lead.lastContact || 'Not logged')}</p></section><section class="detail-section"><h3>Next Action</h3><p>${lead.nextAction || 'No date set'}</p></section><section class="detail-section"><h3>Notes</h3><p>${(lead.notes || []).map(escapeHtml).join('<br>') || 'No notes yet.'}</p></section><div class="drawer-actions"><button type="button" onclick="moveLead('${lead.id}', -1)">Move Back</button><button class="primary" type="button" onclick="moveLead('${lead.id}', 1)">Move Forward</button><button type="button" onclick="setNextAction('${lead.id}', 1)">Follow Up Tomorrow</button><button type="button" onclick="setNextAction('${lead.id}', 3)">Follow Up in 3 Days</button><button type="button" onclick="addNote('${lead.id}')">Add Note</button><button class="danger" type="button" onclick="archiveLead('${lead.id}')">Mark Done</button></div>`; els.detailDrawer.classList.add('open'); }
 function closeLead() { els.detailDrawer.classList.remove('open'); }
+function addNote(id) { const lead = state.leads.find(item => item.id === id); if (!lead) return; const note = prompt('Add a CRM note for this contact'); if (!note) return; lead.notes.unshift(`${todayPlus(0)}: ${note}`); lead.lastContact = todayPlus(0); persist(); render(); openLead(id); }
 function setNextAction(id, days) { const lead = state.leads.find(item => item.id === id); if (!lead) return; lead.nextAction = todayPlus(days); lead.notes.unshift(`Next follow-up set for ${lead.nextAction}.`); persist(); render(); openLead(id); }
 function archiveLead(id) { const lead = state.leads.find(item => item.id === id); if (!lead) return; lead.status = 'done'; lead.notes.unshift(`Marked done on ${todayPlus(0)}.`); persist(); render(); openLead(id); }
 function showView(view) { const button = document.querySelector(`.nav-item[data-view="${view}"]`); if (button) button.click(); }
+function renderCrm() {
+  if (!els.crmGrid || !els.crmTable) return;
+  const leads = filteredCrmLeads();
+  const marketing = state.leads.filter(lead => lead.marketingConsent === 'yes' && (lead.email || lead.phone)).length;
+  const hot = state.leads.filter(lead => leadScore(lead) >= 70).length;
+  const due = state.leads.filter(lead => lead.nextAction <= todayPlus(0) && lead.status !== 'done').length;
+  els.crmGrid.innerHTML = [crmStat('Total Contacts', state.leads.length, 'Every captured form, call, DM, frozen order, and merch request.'), crmStat('Hot Leads', hot, 'High-value catering, booked customers, or urgent follow-ups.'), crmStat('Marketing Ready', marketing, 'Contacts with explicit or imported marketing consent.'), crmStat('Due Now', due, 'People Mike should text, call, quote, or close today.'), crmStat('Catering Buyers', state.leads.filter(lead => lead.section === 'catering').length, 'Best segment for future event promotions.'), crmStat('Repeat Potential', state.leads.filter(lead => ['booked', 'done'].includes(lead.status)).length, 'Customers worth reactivating later.')].join('');
+  els.crmTable.innerHTML = '<div class="crm-row header"><span>Contact</span><span>Details</span><span>Interest</span><span>Score</span><span>Next</span></div>' + (leads.map(crmRow).join('') || '<div class="crm-empty">No contacts match this CRM filter.</div>');
+}
+function crmStat(label, value, helper) { return `<article class="crm-stat"><p class="eyebrow">${label}</p><strong>${value}</strong><p>${helper}</p></article>`; }
+function filteredCrmLeads() {
+  return state.leads.filter(lead => {
+    const haystack = [lead.customer, lead.phone, lead.email, lead.source, lead.details, lead.customerType, lead.tags.join(' '), ...(lead.notes || [])].join(' ').toLowerCase();
+    if (crmSearch && !haystack.includes(crmSearch)) return false;
+    if (crmSegment === 'hot') return leadScore(lead) >= 70;
+    if (crmSegment === 'marketing') return lead.marketingConsent === 'yes';
+    if (crmSegment === 'due') return lead.nextAction <= todayPlus(0) && lead.status !== 'done';
+    if (['catering', 'frozen', 'merch'].includes(crmSegment)) return lead.section === crmSegment;
+    return true;
+  }).slice().sort((a, b) => leadScore(b) - leadScore(a) || new Date(b.createdAt) - new Date(a.createdAt));
+}
+function crmRow(lead) {
+  return `<div class="crm-row"><button type="button" onclick="openLead('${lead.id}')">${escapeHtml(lead.customer)}<small>${escapeHtml(lead.phone || lead.email || 'No contact saved')}</small></button><span>${escapeHtml(lead.email || 'No email')}<small>${escapeHtml(lead.preferredContact || 'No preference')} - ${escapeHtml(lead.marketingConsent === 'yes' ? 'Marketing ok' : 'Consent ' + lead.marketingConsent)}</small></span><span>${sectionMeta[lead.section].label}<small>${escapeHtml(lead.tags.join(', ') || lead.customerType)}</small></span><span><span class="tag green">${leadScore(lead)}</span></span><span>${escapeHtml(lead.nextAction || 'Unset')}<small>${stageLabel(lead.status)}</small></span></div>`;
+}
 function renderSettings() { Object.entries(state.settings).forEach(([key, value]) => { const input = els.settingsForm.querySelector(`[name="${key}"]`); if (input) input.value = value; }); els.playbookList.innerHTML = Object.entries(sectionMeta).map(([, meta]) => `<article class="playbook-item"><strong>${meta.label}</strong><p>${meta.playbook.join(' ')}</p></article>`).join(''); }
 function renderConnections() { els.connectionsGrid.innerHTML = connections.map(item => `<article class="connection-card"><header><div><p class="eyebrow">${escapeHtml(item.id)}</p><h2>${escapeHtml(item.label)}</h2></div><span class="status-dot ${item.status === 'ready' ? 'ready' : item.status === 'blocked' ? 'blocked' : ''}"></span></header><p>${escapeHtml(item.description)}</p><span class="tag ${item.status === 'ready' ? 'green' : 'dark'}">${item.status}</span><p><strong>Next:</strong> ${escapeHtml(item.next)}</p></article>`).join(''); els.schemaBlock.textContent = JSON.stringify(inboundLeadSchema, null, 2); }
 function toast(message) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = message; document.body.appendChild(el); setTimeout(() => el.remove(), 2200); }
 
-window.openLead = openLead; window.closeLead = closeLead; window.moveLead = moveLead; window.setNextAction = setNextAction; window.archiveLead = archiveLead; window.showView = showView; window.MikeNiceDashboard = { dataAdapter, normalizeLead, inboundLeadSchema, getState: () => state };
+window.openLead = openLead; window.closeLead = closeLead; window.moveLead = moveLead; window.setNextAction = setNextAction; window.archiveLead = archiveLead; window.addNote = addNote; window.showView = showView; window.MikeNiceDashboard = { dataAdapter, normalizeLead, inboundLeadSchema, getState: () => state };
