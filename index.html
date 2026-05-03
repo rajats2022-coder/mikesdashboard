@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1c0a00">
+  <title>Mike Nice Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Oswald:wght@500;600;700&family=Pacifico&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <noscript>This dashboard needs JavaScript enabled.</noscript>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Dashboard navigation">
+      <div class="brand-lockup">
+        <img src="assets/mike-nice-logo.png" alt="Mike Nice Empanadas logo">
+        <div><span class="script">Mike Nice</span><strong>Command Center</strong></div>
+      </div>
+      <nav class="side-nav" id="sideNav">
+        <button class="nav-item active" data-view="dashboard" type="button"><span>Overview</span><small>3-panel command</small></button>
+        <button class="nav-item" data-view="catering" type="button"><span>Catering Leads</span><small>Events + quotes</small></button>
+        <button class="nav-item" data-view="frozen" type="button"><span>Frozen Empanadas</span><small>Orders + pickup</small></button>
+        <button class="nav-item" data-view="merch" type="button"><span>Merch</span><small>Gear + fulfillment</small></button>
+        <button class="nav-item" data-view="connections" type="button"><span>Connections</span><small>Forms + email + API</small></button>
+        <button class="nav-item" data-view="settings" type="button"><span>Business Setup</span><small>Rules + reminders</small></button>
+      </nav>
+      <div class="sidebar-card"><p class="eyebrow">Today</p><strong id="todayFocus">Loading</strong><span id="todaySubtext">Preparing lead queue.</span></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><p class="eyebrow">Private operating dashboard</p><h1 id="viewTitle">Overview</h1></div>
+        <div class="top-actions">
+          <button class="ghost-btn" id="exportData" type="button">Export</button>
+          <button class="ghost-btn" id="importData" type="button">Import</button>
+          <button class="ghost-btn" id="resetDemo" type="button">Reset Demo</button>
+          <button class="primary-btn" id="openLeadModal" type="button">Add Lead</button>
+        </div>
+      </header>
+
+      <section class="notice-line"><div class="pulse-dot"></div><p id="notificationSummary">New lead notifications will appear here.</p></section>
+
+      <section class="view active" id="view-dashboard" data-title="Overview">
+        <div class="metric-grid" id="metricGrid"></div>
+        <div class="panel-grid" id="sectionPanels"></div>
+        <div class="two-col">
+          <section class="surface"><div class="section-head"><div><p class="eyebrow">Notifications</p><h2>Lead Inbox</h2></div></div><div class="notification-list" id="notificationList"></div></section>
+          <section class="surface"><div class="section-head"><div><p class="eyebrow">Next actions</p><h2>Follow-Up Queue</h2></div></div><div class="task-list" id="followUpList"></div></section>
+        </div>
+      </section>
+
+      <section class="view" id="view-catering" data-title="Catering Leads"><div class="section-toolbar"><div><p class="eyebrow">Catering notifications</p><h2>Events, quotes, and booked catering</h2></div><div class="filter-row" data-section-filter="catering"></div></div><div class="lead-board" id="cateringBoard"></div></section>
+      <section class="view" id="view-frozen" data-title="Frozen Empanadas"><div class="section-toolbar"><div><p class="eyebrow">Frozen order pipeline</p><h2>Pickup, delivery, and batch prep</h2></div><div class="filter-row" data-section-filter="frozen"></div></div><div class="lead-board" id="frozenBoard"></div></section>
+      <section class="view" id="view-merch" data-title="Merch"><div class="section-toolbar"><div><p class="eyebrow">Merch pipeline</p><h2>Shirts, hats, aprons, and custom drops</h2></div><div class="filter-row" data-section-filter="merch"></div></div><div class="lead-board" id="merchBoard"></div></section>
+
+      <section class="view" id="view-connections" data-title="Connections">
+        <div class="connections-grid" id="connectionsGrid"></div>
+        <section class="surface"><div class="section-head"><div><p class="eyebrow">Integration contract</p><h2>Inbound Lead Format</h2></div><button class="ghost-btn compact" id="copySchema" type="button">Copy Schema</button></div><pre class="code-block" id="schemaBlock"></pre></section>
+      </section>
+
+      <section class="view" id="view-settings" data-title="Business Setup">
+        <div class="settings-grid">
+          <section class="surface"><div class="section-head"><div><p class="eyebrow">Customize</p><h2>Business Rules</h2></div><button class="primary-btn compact" id="saveSettings" type="button">Save</button></div>
+            <form class="settings-form" id="settingsForm">
+              <label>Follow-up SLA hours<input name="slaHours" type="number" min="1" step="1"></label>
+              <label>Catering minimum guests<input name="minGuests" type="number" min="1" step="1"></label>
+              <label>Catering deposit percent<input name="depositPercent" type="number" min="0" max="100" step="1"></label>
+              <label>Frozen pickup days<input name="pickupDays" type="text"></label>
+              <label>Primary phone<input name="phone" type="tel"></label>
+              <label>Notification email<input name="email" type="email"></label>
+            </form>
+          </section>
+          <section class="surface"><div class="section-head"><div><p class="eyebrow">Playbook</p><h2>Mike's Lead Actions</h2></div></div><div class="playbook-list" id="playbookList"></div></section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="lead-modal" id="leadModal">
+    <form method="dialog" class="lead-form" id="leadForm">
+      <div class="modal-head"><div><p class="eyebrow">New opportunity</p><h2>Add lead or order</h2></div><button class="icon-btn" value="cancel" type="submit" aria-label="Close">x</button></div>
+      <div class="form-grid">
+        <label>Section<select name="section" required><option value="catering">Catering</option><option value="frozen">Frozen Empanadas</option><option value="merch">Merch</option></select></label>
+        <label>Status<select name="status" required></select></label>
+        <label>Customer name<input name="customer" required placeholder="Customer or company"></label>
+        <label>Phone<input name="phone" placeholder="(984) 272-2728"></label>
+        <label>Email<input name="email" type="email" placeholder="customer@email.com"></label>
+        <label>Source<select name="source"><option>Website form</option><option>Email</option><option>Instagram</option><option>Phone call</option><option>StreetFoodFinder</option><option>Referral</option><option>API/Webhook</option></select></label>
+        <label>Value<input name="value" type="number" min="0" step="25" placeholder="Estimated $"></label>
+        <label>Next action date<input name="nextAction" type="date"></label>
+        <label class="wide">Request details<textarea name="details" rows="4" placeholder="Event date, guest count, pickup details, merch sizes, notes..."></textarea></label>
+      </div>
+      <menu class="modal-actions"><button class="ghost-btn" value="cancel" type="submit">Cancel</button><button class="primary-btn" value="default" type="submit">Save Lead</button></menu>
+    </form>
+  </dialog>
+
+  <input id="importFile" type="file" accept="application/json" hidden>
+  <aside class="detail-drawer" id="detailDrawer" aria-live="polite"></aside>
+  <script src="app.js"></script>
+</body>
+</html>
