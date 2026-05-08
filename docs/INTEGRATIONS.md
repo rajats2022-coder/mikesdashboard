@@ -1,23 +1,23 @@
 # Integration Plan
 
-The dashboard currently uses browser `localStorage` through `dataAdapter`. When production connections are ready, replace or extend this adapter with API/database calls.
+The dashboard is production-shaped now: it loads from `GET /api/leads`, posts manual entries to `POST /api/leads`, and only uses browser `localStorage` as an offline fallback if the live endpoint is unavailable.
 
 ## Recommended Lead Payload
 
 ```json
 {
   "section": "catering",
-  "customer": "Alicia Morgan",
-  "phone": "(919) 555-0182",
-  "email": "alicia@example.com",
+  "customer": "Customer Name",
+  "phone": "(984) 000-0000",
+  "email": "customer@example.com",
   "source": "Website form",
-  "value": 720,
-  "nextAction": "2026-05-03",
-  "details": "Graduation party in Raleigh. 65 guests. Wants Birria and Pollo Loco.",
+  "value": 0,
+  "nextAction": "2026-05-10",
+  "details": "Customer request details, event notes, order items, or follow-up context.",
   "metadata": {
     "eventDate": "2026-05-10",
-    "guests": 65,
-    "items": ["Birria", "Pollo Loco", "Dessert empanadas"]
+    "guests": 0,
+    "items": []
   }
 }
 ```
@@ -30,7 +30,7 @@ The dashboard currently uses browser `localStorage` through `dataAdapter`. When 
 - `frozen`
 - `merch`
 
-`status` defaults to `new` if omitted. Valid values:
+`status` defaults to `new` if omitted. Valid dashboard values:
 
 - `new`
 - `contacted`
@@ -38,34 +38,36 @@ The dashboard currently uses browser `localStorage` through `dataAdapter`. When 
 - `booked`
 - `done`
 
+The Supabase submissions table stores status as `new`, `contacted`, `completed`, or `archived`; `/api/leads` maps those into dashboard stages.
+
 ## Connection Order
 
-1. Add auth so only Mike/S4 can access the dashboard.
-2. Add persistent database table/collection for leads.
-3. Replace `dataAdapter.load()` and `dataAdapter.save()` with database calls.
-4. Point the public website forms to `POST /api/leads` or a Make/Zapier webhook that writes to the database.
-5. Set up Gmail/lead-email parser to send the same payload shape.
+1. Add production Supabase env vars to the live host.
+2. Run the existing S4 AI Agency Supabase migration.
+3. Add Mike and S4 admin emails to `dashboard_users`.
+4. Point website forms/orders to the server routes.
+5. Test one real submission and confirm it appears in the dashboard.
 6. Add reminder automation for leads with `nextAction <= today` and `status !== done`.
 
 ## Suggested Database Fields
 
+The current Supabase-backed source of truth is `client_form_submissions`:
+
 - `id`
-- `section`
+- `client_id`
+- `form_type`
+- `customer_name`
+- `customer_email`
+- `customer_phone`
+- `message`
+- `order_interest`
+- `event_date`
 - `status`
-- `customer`
-- `phone`
-- `email`
-- `source`
-- `value`
-- `nextAction`
-- `createdAt`
-- `details`
-- `notes`
-- `metadata`
+- `created_at`
 
 ## Failure Handling
 
-- If an incoming payload has an unknown `section`, default to `catering` and add a note for review.
+- If an incoming payload has an unknown `section`, default to `catering`.
 - If `status` is missing, default to `new`.
-- If `nextAction` is missing, default to tomorrow.
-- Never discard the raw request body; store it in `metadata.raw` for debugging.
+- If `nextAction` is missing, use the event/submission date when available.
+- Never put the Supabase service role key in frontend JavaScript.

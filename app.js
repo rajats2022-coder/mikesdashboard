@@ -1,5 +1,5 @@
-const STORAGE_KEY = 'mikeNiceCommandCenter.v2';
-const SCHEMA_VERSION = 3;
+const STORAGE_KEY = 'mikeNiceCommandCenter.production.v1';
+const SCHEMA_VERSION = 4;
 const REFRESH_INTERVAL_MS = 60 * 1000;
 const API_ENDPOINT = '/api/leads';
 
@@ -58,8 +58,8 @@ const connections = [
     id: 'website-catering-form',
     label: 'Website Catering Form',
     status: 'ready',
-    description: 'Route booking form submissions into Catering Leads with section=catering and status=new.',
-    next: 'Connect form action to POST /api/leads or a Make/Zapier webhook.',
+    description: 'Booking form submissions are routed server-side into Supabase and exposed to this dashboard through /api/leads.',
+    next: 'Add production Supabase env vars, run the migration, then submit one real booking test.',
   },
   {
     id: 'email-parser',
@@ -85,16 +85,16 @@ const connections = [
   {
     id: 'database',
     label: 'Database / CRM',
-    status: 'pending',
-    description: 'The prototype uses browser storage. Production should persist to Supabase, Firebase, Airtable, or a custom DB.',
-    next: 'Swap the local adapter with the API adapter in dataAdapter.save/load.',
+    status: 'ready',
+    description: 'The dashboard reads/writes through /api/leads, backed by the existing S4 AI Agency Supabase project when env vars are present.',
+    next: 'Run the multi-tenant migration and add dashboard users before handoff.',
   },
   {
     id: 'auth',
     label: 'Authentication',
-    status: 'pending',
-    description: 'Dashboard is noindex but still needs login before handing to Mike as a real private tool.',
-    next: 'Add Vercel protection, Clerk, Supabase Auth, Firebase Auth, or Cloudflare Access.',
+    status: 'ready',
+    description: 'The companion Mike dashboard uses Supabase magic-link auth and RLS. Protect this command center route before public handoff if needed.',
+    next: 'Add Mike and S4 admin emails to dashboard_users.',
   },
 ];
 
@@ -113,16 +113,6 @@ const inboundLeadSchema = {
   tags: ['wedding', 'corporate', 'birria', 'VIP'],
   metadata: { eventDate: 'optional', guests: 'optional', pickupDate: 'optional', items: 'optional', formName: 'optional' },
 };
-
-const demoLeads = [
-  lead('catering', 'new', 'Alicia Morgan', 720, 'Website form', 'Graduation party in Raleigh. 65 guests. Asked about Birria, Pollo Loco, dessert empanadas, and sauces.', 0, '(919) 555-0182', 'alicia@example.com'),
-  lead('catering', 'quoted', 'Triangle Tech Office', 1180, 'Email', 'Corporate lunch for 95. Wants classic and premium mix, two sides, no pork option, invoice needed.', 1, '(984) 555-0144', 'events@triangletech.example'),
-  lead('catering', 'booked', 'Knightdale Parks Pop-Up', 890, 'Referral', 'Community pop-up. 80 guests. Deposit confirmed. Needs arrival instructions and final count.', 2, '(919) 555-0128', 'parks@example.com'),
-  lead('frozen', 'new', 'Derrick H.', 180, 'Instagram', 'Asked for two dozen Birria frozen and one dozen Buffalo Chicken for Sunday pickup.', 0, '(919) 555-0175', 'derrick@example.com'),
-  lead('frozen', 'contacted', 'Maya R.', 320, 'StreetFoodFinder', 'Family freezer pack request. Mix of classic beef, chicken, and cheese. Wants reheating card.', 3, '(984) 555-0109', 'maya@example.com'),
-  lead('merch', 'new', 'Chris B.', 95, 'Website form', 'Wants black snapback and red tee. Asked if pickup at the truck is possible.', 1, '(704) 555-0166', 'chris@example.com'),
-  lead('merch', 'quoted', 'Jasmine Crew Order', 420, 'Phone call', 'Team order: 8 shirts, 2 hats, 1 apron. Needs sizes confirmed before invoice.', 2, '(980) 555-0191', 'jasmine@example.com'),
-];
 
 const dataAdapter = {
   load() {
@@ -190,10 +180,7 @@ function init() {
   bindNav(); bindModal(); bindSettings(); bindImportExport(); bindConnections(); bindCrm(); bindSync(); renderStatusOptions(); render(); refreshData('startup');
 }
 
-function freshState() { return { schemaVersion: SCHEMA_VERSION, leads: demoLeads.map(item => ({ ...item })), settings: { ...defaultSettings } }; }
-function lead(section, status, customer, value, source, details, dueOffset, phone, email) {
-  return normalizeLead({ section, status, customer, value, source, details, phone, email, preferredContact: phone ? 'Text' : 'Email', customerType: section === 'catering' ? 'Event planner' : section === 'merch' ? 'Fan / merch buyer' : 'Repeat customer', marketingConsent: 'unknown', tags: [sectionMeta[section]?.label || section], nextAction: todayPlus(dueOffset), createdAt: todayPlus(Math.min(0, dueOffset - 2)), notes: [`Seed ${sectionMeta[section]?.label || section} item.`] });
-}
+function freshState() { return { schemaVersion: SCHEMA_VERSION, leads: [], settings: { ...defaultSettings } }; }
 function todayPlus(offset) { const date = new Date(); date.setDate(date.getDate() + offset); return date.toISOString().slice(0, 10); }
 function money(value) { return Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }); }
 function escapeHtml(value = '') { return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
@@ -271,8 +258,7 @@ function bindNav() {
 }
 
 function bindModal() {
-  $('#openLeadModal').addEventListener('click', () => { els.leadForm.reset(); renderStatusOptions(); els.leadModal.showModal(); });
-  $('#resetDemo').addEventListener('click', () => { state = freshState(); persist(); render(); toast('Demo data reset'); });
+  $('#openLeadModal')?.addEventListener('click', () => { els.leadForm.reset(); renderStatusOptions(); els.leadModal.showModal(); });
   els.leadForm.addEventListener('submit', event => {
     if (event.submitter?.value === 'cancel') return;
     event.preventDefault();
@@ -283,18 +269,18 @@ function bindModal() {
 }
 
 function bindSettings() {
-  $('#saveSettings').addEventListener('click', () => {
+  $('#saveSettings')?.addEventListener('click', () => {
     state.settings = { ...state.settings, ...Object.fromEntries(new FormData(els.settingsForm)) };
     persist(); renderSettings(); toast('Settings saved');
   });
 }
 function bindImportExport() {
-  $('#exportData').addEventListener('click', () => {
+  $('#exportData')?.addEventListener('click', () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `mike-nice-dashboard-${todayPlus(0)}.json`; link.click(); URL.revokeObjectURL(link.href);
   });
-  $('#importData').addEventListener('click', () => els.importFile.click());
-  els.importFile.addEventListener('change', async () => {
+  $('#importData')?.addEventListener('click', () => els.importFile.click());
+  els.importFile?.addEventListener('change', async () => {
     const file = els.importFile.files[0]; if (!file) return;
     try { state = normalizeState(JSON.parse(await file.text())); persist(); render(); toast('Import complete'); }
     catch { toast('Import failed: invalid JSON'); }
@@ -302,7 +288,7 @@ function bindImportExport() {
   });
 }
 function bindConnections() {
-  $('#copySchema').addEventListener('click', async () => { await navigator.clipboard?.writeText(JSON.stringify(inboundLeadSchema, null, 2)); toast('Schema copied'); });
+  $('#copySchema')?.addEventListener('click', async () => { await navigator.clipboard?.writeText(JSON.stringify(inboundLeadSchema, null, 2)); toast('Schema copied'); });
 }
 function bindCrm() {
   els.crmSearch?.addEventListener('input', event => { crmSearch = event.target.value.toLowerCase().trim(); renderCrm(); });
@@ -341,6 +327,12 @@ function renderSummary() {
   const newCount = state.leads.filter(lead => lead.status === 'new').length;
   const dueToday = state.leads.filter(lead => lead.nextAction <= todayPlus(0) && lead.status !== 'done').length;
   const cateringNew = state.leads.filter(lead => lead.section === 'catering' && lead.status === 'new').length;
+  if (!state.leads.length) {
+    els.notificationSummary.textContent = 'No real submissions yet. New booking, frozen, and merch requests will appear here after Supabase is connected.';
+    els.todayFocus.textContent = 'No leads yet';
+    els.todaySubtext.textContent = 'Ready for the first real customer submission.';
+    return;
+  }
   els.notificationSummary.textContent = `${newCount} new opportunities, ${dueToday} follow-ups due, ${cateringNew} catering notifications need first action.`;
   els.todayFocus.textContent = `${dueToday} follow-ups`; els.todaySubtext.textContent = `${newCount} new items across catering, frozen, and merch.`;
 }
@@ -351,7 +343,7 @@ function renderDashboard() {
   const newLeads = state.leads.filter(lead => lead.status === 'new').length;
   els.metricGrid.innerHTML = [metric('Pipeline', money(totalValue), 'Estimated value across all sections'), metric('Booked', money(bookedValue), 'Confirmed or completed revenue'), metric('Due Today', due, 'Needs call, text, quote, or payment link'), metric('New Leads', newLeads, 'Fresh notifications to organize')].join('');
   els.sectionPanels.innerHTML = Object.keys(sectionMeta).map(sectionPanel).join('');
-  els.notificationList.innerHTML = state.leads.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 7).map(notificationItem).join('');
+  els.notificationList.innerHTML = state.leads.length ? state.leads.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 7).map(notificationItem).join('') : '<div class="notification-item"><strong>No real submissions yet</strong><p>Once the website form or order APIs receive real data, the newest items will show here.</p></div>'; 
   const followUps = state.leads.filter(lead => lead.status !== 'done').slice().sort(byDate).slice(0, 7);
   els.followUpList.innerHTML = followUps.map(lead => `<button class="task-item" type="button" onclick="openLead('${lead.id}')"><strong>${escapeHtml(lead.customer)}</strong><p>${sectionMeta[lead.section].label} - ${stageLabel(lead.status)} - next action ${lead.nextAction || 'not set'}</p></button>`).join('') || '<div class="task-item"><strong>Nothing due</strong><p>All visible work is either completed or waiting on the customer.</p></div>';
 }
